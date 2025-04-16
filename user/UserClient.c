@@ -146,15 +146,21 @@ MarkReaderWorker(
             break;
         }
 
-        _Analysis_assume_(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
-
         replyMessage.ReplyHeader.Status = 0;
         replyMessage.ReplyHeader.MessageId = message->MessageHeader.MessageId;
-        
-        if ((notification->Contents[0] == 'N') && notification->Contents[1] == 'O')
-            replyMessage.Reply.Rights = 0;
-        else
+
+        if (notification->Size < 2) {
+            // there's definitely no "NO"
             replyMessage.Reply.Rights = 1;
+        }
+        else {
+            _Analysis_assume_(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
+
+            if ((notification->Contents[0] == 'N') && notification->Contents[1] == 'O')
+                replyMessage.Reply.Rights = 0;
+            else
+                replyMessage.Reply.Rights = 1;
+        }
 
         printf("Replying message, Right: %d\n", replyMessage.Reply.Rights);
 
