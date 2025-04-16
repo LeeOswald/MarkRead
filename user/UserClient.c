@@ -101,7 +101,7 @@ MarkReaderWorker(
     LPOVERLAPPED pOvlp;
     BOOL result;
     DWORD outSize;
-    HRESULT hr;
+    HRESULT hr = E_FAIL;
     ULONG_PTR key;
 
 #pragma warning(push)
@@ -141,14 +141,15 @@ MarkReaderWorker(
 
         notification = &message->Notification;
 
-        assert(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
+        if (notification->Size > MARK_READER_READ_BUFFER_SIZE) {
+            printf("ERROR: received message size exceeds %d limit (incompatible driver version?)\n", MARK_READER_READ_BUFFER_SIZE);
+            break;
+        }
+
         _Analysis_assume_(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
 
         replyMessage.ReplyHeader.Status = 0;
         replyMessage.ReplyHeader.MessageId = message->MessageHeader.MessageId;
-
-        //============================================
-        notification->Contents[notification->Size] = 0;
         
         if ((notification->Contents[0] == 'N') && notification->Contents[1] == 'O')
             replyMessage.Reply.Rights = 0;

@@ -1920,7 +1920,7 @@ MarkReaderpScanFileInUserMode (
 
         if (NT_SUCCESS( status ) && (0 != bytesRead)) {
 
-            notification->Size = (ULONG) bytesRead;
+            notification->Size = min((ULONG) bytesRead, MARK_READER_READ_BUFFER_SIZE);
 
             //
             //  Копировать только столько, сколько может вместить буфер.
@@ -1928,7 +1928,7 @@ MarkReaderpScanFileInUserMode (
 
             RtlCopyMemory( &notification->Contents,
                            buffer,
-                           min( notification->Size, MARK_READER_READ_BUFFER_SIZE ) );
+                            notification->Size);
 
             replyLength = sizeof( MARK_READER_REPLY );
 
