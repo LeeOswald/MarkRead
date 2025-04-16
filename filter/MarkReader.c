@@ -1318,6 +1318,19 @@ MarkReaderPostCreate (
 
     FltParseFileNameInformation( nameInfo );
 
+    UNICODE_STRING FileName;
+
+    FileName.Buffer = ExAllocatePoolZero(PagedPool, nameInfo->Name.MaximumLength, 'kraM');
+    if (FileName.Buffer) {
+        FileName.MaximumLength = nameInfo->Name.MaximumLength;
+        FileName.Length = nameInfo->Name.Length;
+        memcpy(FileName.Buffer, nameInfo->Name.Buffer, FileName.Length);
+    }
+    else {
+        FileName.MaximumLength = 0;
+        FileName.Length = 0;
+    }
+    
     //
     //  Проверим, соответствует ли расширение списку интересующих нас расширений.
     //
@@ -1335,7 +1348,7 @@ MarkReaderPostCreate (
         //
         //  Не то расширение, которое нас интересует
         //
-
+        ExFreePool(FileName.Buffer);
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
@@ -1349,7 +1362,7 @@ MarkReaderPostCreate (
         //  Попросим менеджера фильтров отменить создание.
         //
 
-        DbgPrint( "MarkReader: Access denied, undoing create \n" );
+        DbgPrint( "MarkReader: Access denied to %wZ\n", &FileName);
 
         FltCancelFileOpen( FltObjects->Instance, FltObjects->FileObject );
 
@@ -1365,6 +1378,7 @@ MarkReaderPostCreate (
         //  Создание запросило доступ на запись, отметим для повторного сканирования файла. 
         //  Выделим контекст.
         //
+        DbgPrint("MarkReader: write access requested to %wZ\n", &FileName);
 
         status = FltAllocateContext( MarkReaderData.Filter,
                                      FLT_STREAMHANDLE_CONTEXT,
@@ -1400,6 +1414,10 @@ MarkReaderPostCreate (
         }
     }
 
+    if (Data->IoStatus.Status != STATUS_ACCESS_DENIED)
+        DbgPrint("MarkReader: access permitted to %wZ\n", &FileName);
+    
+    ExFreePool(FileName.Buffer);
     return returnStatus;
 }
 
