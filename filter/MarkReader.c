@@ -1305,6 +1305,33 @@ MarkReaderCheckExtension (
     return FALSE;
 }
 
+static void NotifyFileDeted(const UNICODE_STRING* FileName)
+{
+    MARK_READER_NOTIFICATION* notification = ExAllocatePoolZero(NonPagedPool, sizeof(MARK_READER_NOTIFICATION), 'nacS');
+    if (notification) {
+
+        notification->Type = MARK_EVENT_FILE_DELETE;
+
+        notification->FileName.Length = min(FileName->Length, sizeof(notification->FileName.Buffer));
+        RtlCopyMemory(notification->FileName.Buffer, FileName->Buffer, notification->FileName.Length);
+
+        ULONG replyLength = sizeof(MARK_READER_REPLY);
+
+        NTSTATUS status = FltSendMessage(MarkReaderData.Filter,
+            &MarkReaderData.ClientPort,
+            notification,
+            sizeof(MARK_READER_NOTIFICATION),
+            notification,
+            &replyLength,
+            NULL);
+
+        if (!NT_SUCCESS(status))
+            DbgPrint("MarkReader: couldn't send message to user-mode: %08x\n", status);
+
+        ExFreePool(notification);
+    }
+}
+
 FLT_POSTOP_CALLBACK_STATUS
 MarkReaderPostCreate (
     _Inout_ PFLT_CALLBACK_DATA Data,
@@ -1400,6 +1427,14 @@ MarkReaderPostCreate (
 
         DbgPrint( "MarkReader: Access denied to %wZ\n", &nameInfo->Name);
 
+        // BUGBUG: FltCancelFileOpen will NOT prevent deletion of file opened with FILE_DELETE_ON_CLOSE
+        
+        if (Data->Iopb->Parameters.Create.Options & FILE_DELETE_ON_CLOSE) {
+            DbgPrint("MarkReader: delete on close requested for %wZ\n", &nameInfo->Name);
+            NotifyFileDeted(&nameInfo->Name);
+        }
+        
+
         FltCancelFileOpen( FltObjects->Instance, FltObjects->FileObject );
 
         Data->IoStatus.Status = STATUS_ACCESS_DENIED;
@@ -1417,7 +1452,7 @@ MarkReaderPostCreate (
             }
             else if (FltObjects->FileObject->DeleteAccess) {
                 if (Data->Iopb->Parameters.Create.Options & FILE_DELETE_ON_CLOSE) {
-                    DbgPrint("      MarkReader: delete on close requested for %wZ\n", &nameInfo->Name);
+                    DbgPrint("MarkReader: delete on close requested for %wZ\n", &nameInfo->Name);
                     MarkReaderContext->MarkedForDeletion = TRUE;
                 }
             }
@@ -1442,8 +1477,10 @@ MarkReaderPostCreate (
         }
     }
 
+#if 0
     if (Data->IoStatus.Status != STATUS_ACCESS_DENIED)
         DbgPrint("MarkReader: access permitted to %wZ\n", &nameInfo->Name);
+#endif
     
     FltReleaseFileNameInformation(nameInfo);
     return returnStatus;
@@ -1538,34 +1575,10 @@ MarkReaderPreClose(
     if (NT_SUCCESS(status)) {
         if (context->MarkedForDeletion) {
 
-            DbgPrint("MarkReader: deleting %wZ\n", &context->FileName);
+            DbgPrint("MarkReader: deleted %wZ\n", &context->FileName);
 
-            // let the userland know
-            MARK_READER_NOTIFICATION* notification = ExAllocatePoolZero(NonPagedPool, sizeof(MARK_READER_NOTIFICATION), 'nacS');
-            if (notification) {
-
-                notification->Type = MARK_EVENT_FILE_DELETE;
-
-                notification->FileName.Length = min(context->FileName.Length, sizeof(notification->FileName.Buffer));
-                RtlCopyMemory(notification->FileName.Buffer, context->FileName.Buffer, notification->FileName.Length);
-
-                ULONG replyLength = sizeof(MARK_READER_REPLY);
-
-                status = FltSendMessage(MarkReaderData.Filter,
-                    &MarkReaderData.ClientPort,
-                    notification,
-                    sizeof(MARK_READER_NOTIFICATION),
-                    notification,
-                    &replyLength,
-                    NULL);
-
-                if (!NT_SUCCESS(status))
-                    DbgPrint("MarkReader: couldn't send message to user-mode: %08x\n", status);
-
-                ExFreePool(notification);
-            }
+            NotifyFileDeted(&context->FileName);
         }
-        
 
         FltReleaseContext(context);
     }
