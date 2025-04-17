@@ -1529,10 +1529,6 @@ MarkReaderPreCleanup (
 
     if (NT_SUCCESS( status )) {
 
-        if (FltObjects->FileObject->DeletePending) {
-            DbgPrint("MarkReader: [cleanup] pending delete for %wZ\n", &context->FileName);
-        }
-
         if (context->RescanRequired) {
 
             (VOID) MarkReaderpScanFileInUserMode(FltObjects->Instance,
