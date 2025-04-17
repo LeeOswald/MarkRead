@@ -105,6 +105,7 @@ NTSTATUS
 MarkReaderpScanFileInUserMode (
     _In_ PFLT_INSTANCE Instance,
     _In_ PFILE_OBJECT FileObject,
+    _In_ UNICODE_STRING const* FileName,
     _Out_ PBOOLEAN Rights
     );
 
@@ -162,22 +163,74 @@ UINT64 GetIOProcessId(PFLT_CALLBACK_DATA data)
     return (UINT64)pid;
 }
 
+static MARK_READER_STREAM_HANDLE_CONTEXT* AllocateStreamHandleContext(const UNICODE_STRING* FileName)
+{
+    MARK_READER_STREAM_HANDLE_CONTEXT* context = NULL;
+
+    NTSTATUS status = FltAllocateContext(MarkReaderData.Filter,
+        FLT_STREAMHANDLE_CONTEXT,
+        sizeof(MARK_READER_STREAM_HANDLE_CONTEXT),
+        PagedPool,
+        &context);
+
+    RtlZeroMemory(context, sizeof(MARK_READER_STREAM_HANDLE_CONTEXT));
+        
+    if (NT_SUCCESS(status)) {
+        if (FileName) {
+            context->FileName.MaximumLength = FileName->MaximumLength;
+            if (NT_SUCCESS(MarkReaderAllocateUnicodeString(&context->FileName))) {
+                RtlCopyUnicodeString(&context->FileName, FileName);
+            }
+        }
+    }
+
+    return context;
+}
+
+static void FLTAPI DeleteStreamHandleContext(PFLT_CONTEXT context, FLT_CONTEXT_TYPE contextType)
+{
+    UNREFERENCED_PARAMETER(contextType);
+
+    MARK_READER_STREAM_HANDLE_CONTEXT* ctx;
+
+    FLT_ASSERT(context);
+    FLT_ASSERT(contextType == FLT_STREAMHANDLE_CONTEXT);
+
+    ctx = (MARK_READER_STREAM_HANDLE_CONTEXT*)context;
+    MarkReaderFreeUnicodeString(&ctx->FileName);
+}
+
 const FLT_OPERATION_REGISTRATION Callbacks[] = {
 
     { IRP_MJ_CREATE,
       0,
       MarkReaderPreCreate,
-      MarkReaderPostCreate},
+      MarkReaderPostCreate
+    },
 
     { IRP_MJ_CLEANUP,
       0,
       MarkReaderPreCleanup,
-      NULL},
+      NULL
+    },
+
+    { IRP_MJ_CLOSE,
+      0,
+      MarkReaderPreClose,
+      NULL
+    },
+
+    { IRP_MJ_SET_INFORMATION,
+      0,
+      MarkReaderPreSetInformation,
+      MarkReaderPostSetInformation
+    },
 
     { IRP_MJ_WRITE,
       0,
       MarkReaderPreWrite,
-      NULL},
+      NULL
+    },
 
 #if (WINVER>=0x0602)
 
@@ -197,7 +250,7 @@ const FLT_CONTEXT_REGISTRATION ContextRegistration[] = {
 
     { FLT_STREAMHANDLE_CONTEXT,
       0,
-      NULL,
+      DeleteStreamHandleContext,
       sizeof(MARK_READER_STREAM_HANDLE_CONTEXT),
       'chBS' },
 
@@ -1296,6 +1349,7 @@ MarkReaderPostCreate (
     //  Если это создание в любом случае не удалось, не беспокоимся о сканировании сейчас.
     //
 
+    
     if (!NT_SUCCESS( Data->IoStatus.Status ) ||
         (STATUS_REPARSE == Data->IoStatus.Status)) {
 
@@ -1318,43 +1372,25 @@ MarkReaderPostCreate (
 
     FltParseFileNameInformation( nameInfo );
 
-    UNICODE_STRING FileName;
-
-    FileName.Buffer = ExAllocatePoolZero(PagedPool, nameInfo->Name.MaximumLength, 'kraM');
-    if (FileName.Buffer) {
-        FileName.MaximumLength = nameInfo->Name.MaximumLength;
-        FileName.Length = nameInfo->Name.Length;
-        memcpy(FileName.Buffer, nameInfo->Name.Buffer, FileName.Length);
-    }
-    else {
-        FileName.MaximumLength = 0;
-        FileName.Length = 0;
-    }
-    
     //
     //  Проверим, соответствует ли расширение списку интересующих нас расширений.
     //
 
     scanFile = MarkReaderCheckExtension( &nameInfo->Extension );
 
-    //
-    //  Выведем информация об имени файла
-    //
-
-    FltReleaseFileNameInformation( nameInfo );
-
     if (!scanFile) {
 
         //
         //  Не то расширение, которое нас интересует
         //
-        ExFreePool(FileName.Buffer);
+        FltReleaseFileNameInformation(nameInfo);
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
-    (VOID) MarkReaderpScanFileInUserMode( FltObjects->Instance,
-                                       FltObjects->FileObject,
-                                       &locRight );
+    (VOID) MarkReaderpScanFileInUserMode(FltObjects->Instance,
+                                        FltObjects->FileObject,
+                                        &nameInfo->Name,
+                                        &locRight);
 
     if (!locRight) {
 
@@ -1362,7 +1398,7 @@ MarkReaderPostCreate (
         //  Попросим менеджера фильтров отменить создание.
         //
 
-        DbgPrint( "MarkReader: Access denied to %wZ\n", &FileName);
+        DbgPrint( "MarkReader: Access denied to %wZ\n", &nameInfo->Name);
 
         FltCancelFileOpen( FltObjects->Instance, FltObjects->FileObject );
 
@@ -1371,28 +1407,20 @@ MarkReaderPostCreate (
 
         returnStatus = FLT_POSTOP_FINISHED_PROCESSING;
 
-    } else if (FltObjects->FileObject->WriteAccess) {
+    } else if ((FltObjects->FileObject->WriteAccess) || (FltObjects->FileObject->DeleteAccess)) {
 
-        //
-        //
-        //  Создание запросило доступ на запись, отметим для повторного сканирования файла. 
-        //  Выделим контекст.
-        //
-        DbgPrint("MarkReader: write access requested to %wZ\n", &FileName);
+        MarkReaderContext = AllocateStreamHandleContext(&nameInfo->Name);
+        if (MarkReaderContext) {
 
-        status = FltAllocateContext( MarkReaderData.Filter,
-                                     FLT_STREAMHANDLE_CONTEXT,
-                                     sizeof(MARK_READER_STREAM_HANDLE_CONTEXT),
-                                     PagedPool,
-                                     &MarkReaderContext );
-
-        if (NT_SUCCESS(status)) {
-
-            //
-            //  Установим контекст дескриптора.
-            //
-
-            MarkReaderContext->RescanRequired = TRUE;
+            if (FltObjects->FileObject->WriteAccess) {
+                MarkReaderContext->RescanRequired = TRUE;
+            }
+            else if (FltObjects->FileObject->DeleteAccess) {
+                if (Data->Iopb->Parameters.Create.Options & FILE_DELETE_ON_CLOSE) {
+                    DbgPrint("      MarkReader: delete on close requested for %wZ\n", &nameInfo->Name);
+                    MarkReaderContext->MarkedForDeletion = TRUE;
+                }
+            }
 
             (VOID) FltSetStreamHandleContext( FltObjects->Instance,
                                               FltObjects->FileObject,
@@ -1415,9 +1443,9 @@ MarkReaderPostCreate (
     }
 
     if (Data->IoStatus.Status != STATUS_ACCESS_DENIED)
-        DbgPrint("MarkReader: access permitted to %wZ\n", &FileName);
+        DbgPrint("MarkReader: access permitted to %wZ\n", &nameInfo->Name);
     
-    ExFreePool(FileName.Buffer);
+    FltReleaseFileNameInformation(nameInfo);
     return returnStatus;
 }
 
@@ -1464,11 +1492,16 @@ MarkReaderPreCleanup (
 
     if (NT_SUCCESS( status )) {
 
+        if (FltObjects->FileObject->DeletePending) {
+            DbgPrint("MarkReader: [cleanup] pending delete for %wZ\n", &context->FileName);
+        }
+
         if (context->RescanRequired) {
 
-            (VOID) MarkReaderpScanFileInUserMode( FltObjects->Instance,
-                                               FltObjects->FileObject,
-                                               &safe );
+            (VOID) MarkReaderpScanFileInUserMode(FltObjects->Instance,
+                                                FltObjects->FileObject,
+                                                &context->FileName,
+                                                &safe);
 
             if (!safe) {
 
@@ -1481,6 +1514,142 @@ MarkReaderPreCleanup (
 
 
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+FLT_PREOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPreClose(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID* CompletionContext
+)
+{
+    NTSTATUS status;
+    MARK_READER_STREAM_HANDLE_CONTEXT* context = NULL;
+
+    UNREFERENCED_PARAMETER(Data);
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    status = FltGetStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        &context);
+
+    if (NT_SUCCESS(status)) {
+        if (context->MarkedForDeletion) {
+
+            DbgPrint("MarkReader: deleting %wZ\n", &context->FileName);
+
+            // let the userland know
+            MARK_READER_NOTIFICATION* notification = ExAllocatePoolZero(NonPagedPool, sizeof(MARK_READER_NOTIFICATION), 'nacS');
+            if (notification) {
+
+                notification->Type = MARK_EVENT_FILE_DELETE;
+
+                notification->FileName.Length = min(context->FileName.Length, sizeof(notification->FileName.Buffer));
+                RtlCopyMemory(notification->FileName.Buffer, context->FileName.Buffer, notification->FileName.Length);
+
+                ULONG replyLength = sizeof(MARK_READER_REPLY);
+
+                status = FltSendMessage(MarkReaderData.Filter,
+                    &MarkReaderData.ClientPort,
+                    notification,
+                    sizeof(MARK_READER_NOTIFICATION),
+                    notification,
+                    &replyLength,
+                    NULL);
+
+                if (!NT_SUCCESS(status))
+                    DbgPrint("MarkReader: couldn't send message to user-mode: %08x\n", status);
+
+                ExFreePool(notification);
+            }
+        }
+        
+
+        FltReleaseContext(context);
+    }
+
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+FLT_PREOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPreSetInformation(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID* CompletionContext
+)
+{
+    UNREFERENCED_PARAMETER(CompletionContext);
+    
+    FILE_INFORMATION_CLASS infoClass;
+    FLT_PREOP_CALLBACK_STATUS result = FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    *CompletionContext = NULL;
+    infoClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
+
+    if (
+        (infoClass == FileDispositionInformation) ||
+        (infoClass == FileDispositionInformationEx)
+        )
+    {
+        MARK_READER_STREAM_HANDLE_CONTEXT* context = NULL;
+        NTSTATUS status = FltGetStreamHandleContext(
+            FltObjects->Instance,
+            FltObjects->FileObject,
+            &context);
+
+        if (NT_SUCCESS(status)) {
+            result = FLT_PREOP_SUCCESS_WITH_CALLBACK;
+            *CompletionContext = context;
+        }
+    }
+    
+    return result;
+}
+
+FLT_POSTOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPostSetInformation(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID CompletionContext,
+    FLT_POST_OPERATION_FLAGS Flags
+)
+{
+    UNREFERENCED_PARAMETER(FltObjects);
+    UNREFERENCED_PARAMETER(Flags);
+
+    MARK_READER_STREAM_HANDLE_CONTEXT* context = (MARK_READER_STREAM_HANDLE_CONTEXT*)CompletionContext;
+    FLT_ASSERT(context);
+
+    if (Data->IoStatus.Status == STATUS_SUCCESS) {
+
+        // are they deleting this file?
+        FILE_INFORMATION_CLASS infoClass;
+        infoClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
+
+        if (infoClass == FileDispositionInformation) {
+            if (((PFILE_DISPOSITION_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer)->DeleteFile) {
+                context->MarkedForDeletion = TRUE;
+                DbgPrint("MarkReader: marked for deletion by FileDispositionInformation %wZ\n", &context->FileName);
+            }
+
+        }
+        else if (infoClass == FileDispositionInformationEx) {
+            ULONG f = ((PFILE_DISPOSITION_INFORMATION_EX)Data->Iopb->Parameters.SetFileInformation.InfoBuffer)->Flags;
+
+            if (f & FILE_DISPOSITION_DELETE) {
+                context->MarkedForDeletion = TRUE;
+                DbgPrint("MarkReader: marked for deletion by FileDispositionInformationEx %wZ\n", &context->FileName);
+            }
+        }
+    }
+
+    FltReleaseContext(context);
+
+    return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
 
@@ -1605,7 +1774,11 @@ MarkReaderPreWrite (
                 leave;
             }
 
-            notification->Size = min( Data->Iopb->Parameters.Write.Length, MARK_READER_READ_BUFFER_SIZE );
+            notification->FileAccessInfo.Size = min( Data->Iopb->Parameters.Write.Length, MARK_READER_READ_BUFFER_SIZE );
+
+            notification->Type = MARK_EVENT_FILE_ACCESS;
+            notification->FileName.Length = min(context->FileName.Length, sizeof(notification->FileName.Buffer));
+            RtlCopyMemory(notification->FileName.Buffer, context->FileName.Buffer, notification->FileName.Length);
 
             //
             //  Буфер может быть необработанным пользовательским буфером. Защитим доступ к нему
@@ -1613,9 +1786,9 @@ MarkReaderPreWrite (
 
             try  {
 
-                RtlCopyMemory( &notification->Contents,
+                RtlCopyMemory( &notification->FileAccessInfo.Contents,
                                buffer,
-                               notification->Size );
+                               notification->FileAccessInfo.Size );
 
             } except( EXCEPTION_EXECUTE_HANDLER ) {
 
@@ -1807,6 +1980,7 @@ NTSTATUS
 MarkReaderpScanFileInUserMode (
     _In_ PFLT_INSTANCE Instance,
     _In_ PFILE_OBJECT FileObject,
+    _In_ UNICODE_STRING const* FileName,
     _Out_ PBOOLEAN Rights
     )
 /*++
@@ -1923,7 +2097,6 @@ MarkReaderpScanFileInUserMode (
         //
         //  Прочитать начало файла и передать его содержимое в пользовательский режим.
         //
-
         offset.QuadPart = bytesRead = 0;
         status = FltReadFile( Instance,
                               FileObject,
@@ -1938,15 +2111,20 @@ MarkReaderpScanFileInUserMode (
 
         if (NT_SUCCESS( status ) && (0 != bytesRead)) {
 
-            notification->Size = min((ULONG) bytesRead, MARK_READER_READ_BUFFER_SIZE);
+            notification->Type = MARK_EVENT_FILE_ACCESS;
+
+            notification->FileName.Length = min(FileName->Length, sizeof(notification->FileName.Buffer));
+            RtlCopyMemory(notification->FileName.Buffer, FileName->Buffer, notification->FileName.Length);
+
+            notification->FileAccessInfo.Size = min((ULONG) bytesRead, MARK_READER_READ_BUFFER_SIZE);
 
             //
             //  Копировать только столько, сколько может вместить буфер.
             //
 
-            RtlCopyMemory( &notification->Contents,
+            RtlCopyMemory( &notification->FileAccessInfo.Contents,
                            buffer,
-                            notification->Size);
+                            notification->FileAccessInfo.Size);
 
             replyLength = sizeof( MARK_READER_REPLY );
 
@@ -1970,6 +2148,10 @@ MarkReaderpScanFileInUserMode (
 
                 DbgPrint( "MarkReader: couldn't send message to user-mode to scan file, status 0x%X\n", status );
             }
+        }
+        else {
+            if (!NT_SUCCESS(status))
+                DbgPrint("MarkReader: file read failed: %08x\n", status);
         }
 
     } finally {

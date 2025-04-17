@@ -72,6 +72,24 @@ Usage(
     printf("Usage: userclient [requests per thread] [number of threads(1-64)]\n");
 }
 
+/*++
+* Convert from Unicode to current locale
+* Use HeapFree() to delete the out string
+* --*/
+static char* UnicodeToLocal(const WCHAR* Source, ULONG SourceLength)
+{
+    int Required = WideCharToMultiByte(CP_THREAD_ACP, 0, Source, SourceLength / sizeof(WCHAR), NULL, 0, NULL, NULL);
+    Required += 1; // for \0
+    char* Buffer = HeapAlloc(GetProcessHeap(), 0, Required);
+    if (!Buffer)
+        return NULL;
+
+    int Length = WideCharToMultiByte(CP_THREAD_ACP, 0, Source, SourceLength / sizeof(WCHAR), Buffer, Required, NULL, NULL);
+    Buffer[Length] = '\0';
+
+    return Buffer;
+}
+
 
 DWORD
 MarkReaderWorker(
@@ -137,44 +155,51 @@ MarkReaderWorker(
             break;
         }
 
-        printf("Received message, size %Id\n", pOvlp->InternalHigh);
-
         notification = &message->Notification;
+        
+        char* FileName = notification->FileName.Length ? UnicodeToLocal(notification->FileName.Buffer, notification->FileName.Length) : NULL;
+        
+        if (notification->Type == MARK_EVENT_FILE_ACCESS) {
 
-        if (notification->Size > MARK_READER_READ_BUFFER_SIZE) {
-            printf("ERROR: received message size exceeds %d limit (incompatible driver version?)\n", MARK_READER_READ_BUFFER_SIZE);
-            break;
-        }
+            if (notification->FileAccessInfo.Size > MARK_READER_READ_BUFFER_SIZE) {
+                printf("ERROR: received message size exceeds %d limit (incompatible driver version?)\n", MARK_READER_READ_BUFFER_SIZE);
+                break;
+            }
+            
+            if (notification->FileAccessInfo.Size < 2) {
+                // there's definitely no "NO"
+                replyMessage.Reply.Rights = 1;
+            }
+            else {
+                _Analysis_assume_(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
 
-        replyMessage.ReplyHeader.Status = 0;
-        replyMessage.ReplyHeader.MessageId = message->MessageHeader.MessageId;
+                if ((notification->FileAccessInfo.Contents[0] == 'N') && notification->FileAccessInfo.Contents[1] == 'O')
+                    replyMessage.Reply.Rights = 0;
+                else
+                    replyMessage.Reply.Rights = 1;
+            }
 
-        if (notification->Size < 2) {
-            // there's definitely no "NO"
-            replyMessage.Reply.Rights = 1;
+            printf("Access %s to [%s]\n", (replyMessage.Reply.Rights ? "PERMITTED" : "DENIED"), (FileName ? FileName : "?"));
+        } 
+        else if (notification->Type == MARK_EVENT_FILE_DELETE) {
+            printf("DELETED file [%s]\n", (FileName ? FileName : "?"));
         }
         else {
-            _Analysis_assume_(notification->Size <= MARK_READER_READ_BUFFER_SIZE);
-
-            if ((notification->Contents[0] == 'N') && notification->Contents[1] == 'O')
-                replyMessage.Reply.Rights = 0;
-            else
-                replyMessage.Reply.Rights = 1;
+            printf("ERROR: unknown message type %d (incompatible driver version?)\n", notification->Type);
         }
 
-        printf("Replying message, Right: %d\n", replyMessage.Reply.Rights);
+        if (FileName)
+            HeapFree(GetProcessHeap(), 0, FileName);
+
+        // post reply in any case
+        replyMessage.ReplyHeader.Status = 0;
+        replyMessage.ReplyHeader.MessageId = message->MessageHeader.MessageId;
 
         hr = FilterReplyMessage(Context->Port,
             (PFILTER_REPLY_HEADER)&replyMessage,
             sizeof(replyMessage));
 
-        if (SUCCEEDED(hr)) {
-
-            printf("Replied message\n");
-
-        }
-        else {
-
+        if (!SUCCEEDED(hr)) {
             printf("MarkReader: Error replying message. Error = 0x%X\n", hr);
             break;
         }

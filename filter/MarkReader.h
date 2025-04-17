@@ -62,6 +62,8 @@ extern MARK_READER_DATA MarkReaderData;
 typedef struct _MARK_READER_STREAM_HANDLE_CONTEXT {
 
     BOOLEAN RescanRequired;
+    UNICODE_STRING FileName; // includes path
+    BOOLEAN MarkedForDeletion;
     
 } MARK_READER_STREAM_HANDLE_CONTEXT, *PMARK_READER_STREAM_HANDLE_CONTEXT;
 
@@ -118,11 +120,37 @@ MarkReaderPostCreate (
     );
 
 FLT_PREOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPreSetInformation(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID* CompletionContext
+);
+
+FLT_POSTOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPostSetInformation(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID CompletionContext,
+    FLT_POST_OPERATION_FLAGS Flags
+);
+
+FLT_PREOP_CALLBACK_STATUS
 MarkReaderPreCleanup (
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Flt_CompletionContext_Outptr_ PVOID *CompletionContext
     );
+
+
+FLT_PREOP_CALLBACK_STATUS
+FLTAPI
+MarkReaderPreClose(
+    PFLT_CALLBACK_DATA Data,
+    PCFLT_RELATED_OBJECTS FltObjects,
+    PVOID* CompletionContext
+);
 
 FLT_PREOP_CALLBACK_STATUS 
 MarkReaderPreWrite (

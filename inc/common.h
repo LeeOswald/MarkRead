@@ -1,4 +1,5 @@
 #pragma once
+
 /*++
 
 Имя модуля:
@@ -23,14 +24,28 @@
 
 const PWSTR MarkReaderPortName = L"\\MarkReaderPort";
 
+typedef enum {
+    MARK_EVENT_FILE_ACCESS = 1,
+    MARK_EVENT_FILE_DELETE = 2
+} MARK_EVENT_TYPE;
 
+
+#define MARK_READER_MAX_FILENAME_LENGTH 256 // for demonstration purposes only; real NTFS file paths can be up to 32767 characters long
 #define MARK_READER_READ_BUFFER_SIZE   1024
 
 typedef struct _MARK_READER_NOTIFICATION {
 
-    ULONG Size;
-    ULONG Reserved;             // для выравнивания структуры содержимого по четырем словам
-    UCHAR Contents[MARK_READER_READ_BUFFER_SIZE];
+    MARK_EVENT_TYPE Type;
+    
+    struct {
+        ULONG Length;                                  // bytes (like in UNICODE_STRING)
+        WCHAR Buffer[MARK_READER_MAX_FILENAME_LENGTH]; // no '\0'
+    } FileName;
+
+    struct {
+        ULONG Size;
+        DECLSPEC_ALIGN(16) UCHAR Contents[MARK_READER_READ_BUFFER_SIZE];
+    } FileAccessInfo;
     
 } MARK_READER_NOTIFICATION, *PMARK_READER_NOTIFICATION;
 
