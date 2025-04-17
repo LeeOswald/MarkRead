@@ -100,6 +100,7 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);POOL_NX_OPTIN=1</PreprocessorDefinitions>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\inc</AdditionalIncludeDirectories>
@@ -124,6 +125,7 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);POOL_NX_OPTIN=1</PreprocessorDefinitions>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\inc</AdditionalIncludeDirectories>
@@ -148,6 +150,7 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);POOL_NX_OPTIN=1</PreprocessorDefinitions>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\inc</AdditionalIncludeDirectories>
@@ -172,6 +175,7 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);POOL_NX_OPTIN=1</PreprocessorDefinitions>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);..\inc</AdditionalIncludeDirectories>

@@ -100,6 +100,7 @@
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);UNICODE;_UNICODE</PreprocessorDefinitions>
@@ -121,6 +122,7 @@
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(IFSKIT_INC_PATH);$(DDK_INC_PATH);..\inc</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);UNICODE;_UNICODE</PreprocessorDefinitions>
@@ -143,6 +145,7 @@
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);UNICODE;_UNICODE</PreprocessorDefinitions>
@@ -164,6 +167,7 @@
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(IFSKIT_INC_PATH);$(DDK_INC_PATH);..\inc</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);UNICODE;_UNICODE</PreprocessorDefinitions>
