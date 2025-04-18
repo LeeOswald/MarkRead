@@ -25,22 +25,41 @@ static int printHelp()
     return 1;
 }
 
+static std::string UTF16ToUTF8(std::wstring_view input) {
+    const auto size = WideCharToMultiByte(CP_UTF8, 0, input.data(), static_cast<int>(input.size()), nullptr, 0, nullptr, nullptr);
+    if (size == 0) {
+        return {};
+    }
+
+    std::string output(size, '\0');
+
+    if (size != WideCharToMultiByte(CP_UTF8, 0, input.data(), static_cast<int>(input.size()),
+        &output[0], static_cast<int>(output.size()), nullptr,
+        nullptr)) {
+        output.clear();
+    }
+
+    return output;
+}
+
+
 static int cycle(const std::string& path)
 {
     for (;;) {
         for (const auto& entry : fs::directory_iterator(path)) {
             if (!entry.is_directory()) {
+                auto pathu8 = UTF16ToUTF8(entry.path().native());
                 try {
-                    std::ifstream ifs(entry.path().string());
+                    std::ifstream ifs(entry.path());
                     if (ifs.is_open()) {
-                        HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " File opened Ok: " + entry.path().filename().string() + "\n");
+                        HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " File opened Ok: " + pathu8 + "\n");
                     }
                     else {
-                        HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " Access denied!: " + entry.path().filename().string() + "\n");
+                        HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " Access denied!: " + pathu8 + "\n");
                     }
                 }
                 catch (std::exception& e) {
-                    HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " Error opening " + entry.path().filename().string() + ": " +  e.what() + "\n");
+                    HELP::log.log_(HELP::make_time_stamp("%Y:%m:%d %H.%M.%S_") + " Error opening " + pathu8 + ": " +  e.what() + "\n");
                 }
             }
         }
@@ -147,6 +166,8 @@ static int deleteWithDeleteFileTransactedA(const std::string& path)
 
 int main(int argc, char** argv)
 {
+    SetConsoleOutputCP(CP_UTF8);
+
     if (argc < 2)
         return printHelp();
 

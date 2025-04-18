@@ -2160,7 +2160,7 @@ MarkReaderpScanFileInUserMode (
         }
         else {
             if (!NT_SUCCESS(status))
-                DbgPrint("MarkReader: file read failed: %08x\n", status);
+                DbgPrint("MarkReader: file [%wZ] read failed: %08x\n", FileName, status);
         }
 
     } finally {

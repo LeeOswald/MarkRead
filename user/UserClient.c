@@ -74,17 +74,17 @@ Usage(
 
 /*++
 * Convert from Unicode to current locale
-* Use HeapFree() to delete the out string
+* Use free() to delete the out string
 * --*/
 static char* UnicodeToLocal(const WCHAR* Source, ULONG SourceLength)
 {
-    int Required = WideCharToMultiByte(CP_THREAD_ACP, 0, Source, SourceLength / sizeof(WCHAR), NULL, 0, NULL, NULL);
+    int Required = WideCharToMultiByte(CP_UTF8, 0, Source, SourceLength / sizeof(WCHAR), NULL, 0, NULL, NULL);
     Required += 1; // for \0
-    char* Buffer = HeapAlloc(GetProcessHeap(), 0, Required);
+    char* Buffer = malloc(Required);
     if (!Buffer)
         return NULL;
 
-    int Length = WideCharToMultiByte(CP_THREAD_ACP, 0, Source, SourceLength / sizeof(WCHAR), Buffer, Required, NULL, NULL);
+    int Length = WideCharToMultiByte(CP_UTF8, 0, Source, SourceLength / sizeof(WCHAR), Buffer, Required, NULL, NULL);
     Buffer[Length] = '\0';
 
     return Buffer;
@@ -189,7 +189,7 @@ MarkReaderWorker(
         }
 
         if (FileName)
-            HeapFree(GetProcessHeap(), 0, FileName);
+            free(FileName);
 
         // post reply in any case
         replyMessage.ReplyHeader.Status = 0;
@@ -255,6 +255,8 @@ main(
     DWORD threadId;
     HRESULT hr;
     DWORD i, j;
+
+    SetConsoleOutputCP(CP_UTF8);
 
     //
     //  Проверьте желаемое количество потоков и запросов на поток.
